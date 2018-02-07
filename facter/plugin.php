@@ -8,7 +8,7 @@
 * curl -F "userfile=@/root/facter.txt" -u username:password "http://racktables/index.php?module=redirect&page=depot&tab=facter&op=Update"
 *
 * Usage instructions:
-*  Add to plugins folder along with manifest file
+*  Add to plugins folder along with attributes file
 *  To get VMs to auto add you have to create a facter function to return a list like:
 *  export FACTER_VMs=$(virsh list | awk '$3 == "running" {printf $2","}' | sed -e 's/,$//');
 *  Whatever you use for VMs it should return a list like: vms => vm1,vm2
@@ -28,7 +28,7 @@
 * - added generic looping to easially add fields
 * - Corrected issues with VM's breaking script
 * - reverted .yaml parsing due to strings in facter not parsing right for mem. options
-* - added error checking to ignore unusable lines in manifest file
+* - added error checking to ignore unusable lines in attributes file
 * - fixed ip additions for 20.1
 * - added VM auto adding to Parent
 *
@@ -233,9 +233,9 @@ function Update()
 
 	//Generic to read in from file
 	global $racktables_plugins_dir;
-	$manifest_file = fopen($racktables_plugins_dir . "/manifest", "r") or die("Could not open manifest, make sure it is in the websrv root and called manifest \n");
-	while ( ! feof ($manifest_file)) {
-		$tmp_line = fgets($manifest_file);
+	$attributes_file = fopen($racktables_plugins_dir . "/attributes", "r") or die("Could not open attributes, make sure it is in the websrv root and called attributes \n");
+	while ( ! feof ($attributes_file)) {
+		$tmp_line = fgets($attributes_file);
 		if (!empty($tmp_line) && !preg_match("/\/\//",$tmp_line)) {
 			@list($Fact, $Attr, $Chapter) = array_map('trim', (explode(',', $tmp_line, 3)));
 			//check for multi-facter names
@@ -276,7 +276,7 @@ function Update()
 			}
 		}
 	}
-	fclose($manifest_file);
+	fclose($attributes_file);
 
 	// Add network interfaces
 
