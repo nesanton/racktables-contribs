@@ -37,27 +37,49 @@
 *
 */
 
+function plugin_facter_info ()
+{
+    return array
+    (
+        'name' => 'facter',
+        'longname' => 'Facter',
+        'version' => '1.0',
+        'home_url' => 'http://www.racktables.org/'
+    );
+}
 
-// Depot Tab for objects.
-$tab['depot']['facter'] = 'Facter';
-$tabhandler['depot']['facter'] = 'ViewHTML';
-$ophandler['depot']['facter']['Update'] = 'Update';
+function plugin_facter_init ()
+{
+    // Depot Tab for objects.
+    global $tab;
+    $tab['depot']['facter'] = 'Facter';
+    registerTabHandler ('depot', 'facter', 'ViewHTML');
+    registerOpHandler ('depot', 'facter', 'Update', 'Update');
+}
+
+
+function plugin_facter_install ()
+{
+    return TRUE;
+}
+
+function plugin_facter_uninstall ()
+{
+    return TRUE;
+}
+
+function plugin_facter_upgrade ()
+{
+    return TRUE;
+}
 
 // The ophandler to insert objects (if any)
 function Update()
 {
-	// Read uploaded file
-	$lines = file($_FILES['userfile']['tmp_name']);
 
-	// add file contents to facter array
-	foreach ($lines as $line_num => $line)
-	{
-		$tmpfacter=explode("=>",$line,2);
-		$facter[trim($tmpfacter[0])]=str_replace('"', '',trim($tmpfacter[1]));
-	}
+	$facts = file_get_contents($_FILES['userfile']['tmp_name']);
+	$facter = json_decode($facts, true);
 
-	// Fix fqdn since all fields have \n inn them
-	$facter['fqdn']=str_replace("\n","", $facter['fqdn']);
 
 	// Check if it's an existing machine
 	// 2011-08-31 <neil.scholten@gamigo.com>
@@ -81,7 +103,7 @@ function Update()
 	if (! isset($id))
 	{
 		// Check to see if it's a physical machine and get the correct id for Server
-		if ($facter['is_virtual']=="false")
+		if (!$facter['is_virtual'])
 		{
 			// Find server id
 			$query = "select dict_key from Dictionary where dict_value='Server' LIMIT 1";
@@ -144,9 +166,9 @@ function Update()
 	$update_hw_type = true;
 	if (isset($_GET['update_hw_type']) && $_GET['update_hw_type'] == 'false')
 	{
-		$update_hw_type = false
+		$update_hw_type = false;
 	}
-	if ($facter['is_virtual']=="false" && $update_hw_type)
+	if (!$facter['is_virtual'] && $update_hw_type)
 	{
 		$iHWTemp				= preg_match('([a-zA-Z]{1,})', $facter['manufacturer'], $matches);
 		$sManufacturer	= $matches[0];
@@ -222,7 +244,7 @@ function Update()
 		// Ubuntu LTS can be detected by an even OS Major and an OS minor of '04'.
 		// Example Ubuntu 'operatingsystemrelease' values: '16.10', '15.04'.
 		$os_release_lts = "";
-		$facter_osrelease = explode(".", $facter['operatingsystemrelease'])
+		$facter_osrelease = explode(".", $facter['operatingsystemrelease']);
 		if ($facter['operatingsystem'] == 'Ubuntu' && $facter_osrelease[0] % 2 == 0 && $facter_osrelease[1] == '04') {
 			$os_release_lts = " LTS";
 		}
@@ -233,7 +255,7 @@ function Update()
 
 	//Generic to read in from file
 	global $racktables_plugins_dir;
-	$attributes_file = fopen($racktables_plugins_dir . "/attributes", "r") or die("Could not open attributes, make sure it is in the websrv root and called attributes \n");
+	$attributes_file = fopen($racktables_plugins_dir . "/facter/attributes", "r") or die("Could not open attributes, make sure it is in the websrv root and called attributes \n");
 	while ( ! feof ($attributes_file)) {
 		$tmp_line = fgets($attributes_file);
 		if (!empty($tmp_line) && !preg_match("/\/\//",$tmp_line)) {
@@ -286,8 +308,6 @@ function Update()
 	// Go through all interfaces and add IP and MAC
 	$count = count($nics);
 	for ($i = 0; $i < $count; $i++) {
-		// Remove newline from the field
-		$nics[$i]=str_replace("\n","", $nics[$i]);
 
 		// We generally don't monitor sit interfaces.
 		// We don't do this for lo interfaces, too
@@ -306,7 +326,7 @@ function Update()
 			$mac = $facter['macaddress_' . $nics[$i]];
 
 			//check if VM or not
-			if ($facter['is_virtual']=="false")
+			if (!$facter['is_virtual'])
 			{
 				// Find 1000Base-T id
 				$query = "select id from PortOuterInterface where oif_name REGEXP '^ *1000Base-T$' LIMIT 1";
@@ -323,47 +343,44 @@ function Update()
 				$nictypeid=$resultarray[0]['id'];
 			}
 
-			// Remove newline from ip
-			$ip=str_replace("\n","", $ip);
-
 			// Check to se if the interface has an ip assigned
 			$query = "SELECT object_id FROM IPv4Allocation where object_id=$newmachine and name=\"$nics[$i]\"";
 			unset($result);
 			$result = usePreparedSelectBlade ($query);
 			$resultarray = $result->fetchAll (PDO::FETCH_ASSOC);
 
+            $ipcheck = array();
 			if($resultarray) {
 				unset($id);
 				$ipcheck=$resultarray;
 			}
 			// Check if it's been configured a port already
-			$query = "SELECT id,iif_id FROM Port where object_id=$newmachine and name=\"$nics[$i]\"";
+			$query = "SELECT id,iif_id,type FROM Port where object_id=$newmachine and name=\"$nics[$i]\"";
 			unset($result);
 			$result = usePreparedSelectBlade ($query);
 			$resultarray = $result->fetchAll (PDO::FETCH_ASSOC);
-
 			if($resultarray) {
 				$portid = $resultarray[0]['id'];
 				unset($id);
 				$portcheck=$resultarray;
-			}
-			// Add/update port
-			// 2011-08-31 <neil.scholten@gamigo.com>
-			// * Don't touch already existing complex ports
-			if ( $resultarray[0]['type'] != 9 ) {
-				if ( count($portcheck) == 1 ) {
-					commitUpdatePort($newmachine,$portid, $nics[$i], $nictypeid, "Ethernet port", "$mac", NULL);
-				}
-				else
-				{
-					commitAddPort($object_id = $newmachine, $nics[$i], $nictypeid,'Ethernet port',"$mac");
-				}
-			} else {
-				//We've got a complex port, don't touch it, it raises an error with 'Database error: foreign key violation'
+    			// Add/update port
+    			// 2011-08-31 <neil.scholten@gamigo.com>
+    			// * Don't touch already existing complex ports
+    			if ( $resultarray[0]['type'] != 9 ) {
+    				if ( count($portcheck) == 1 ) {
+    					commitUpdatePort($newmachine,$portid, $nics[$i], $nictypeid, $nics[$i], "$mac", NULL);
+    				}
+    				else
+    				{
+    					commitAddPort($object_id = $newmachine, $nics[$i], $nictypeid, $nics[$i],"$mac");
+    				}
+    			} else {
+    				//We've got a complex port, don't touch it, it raises an error with 'Database error: foreign key violation'
+    			}
 			}
 			if (count($ipcheck) == 1 ) {
 				if( $ip ) {
-					updateAddress(ip_parse($ip) , $newmachine, $nics[$i],'regular');
+					updateAddress(ip_parse($ip), $nics[$i]);
 				}
 			}
 			else
@@ -386,7 +403,7 @@ function Update()
 // Display the import page.
 function ViewHTML()
 {
-	startPortlet();
+	startPortlet('Facter');
 	echo "<table with=90% align=center border=0 cellpadding=5 cellspacing=0 align=center class=cooltable><tr valign=top>";
 	echo "<form method=post enctype=\"multipart/form-data\" action='index.php?module=redirect&page=depot&tab=facter&op=Update'>";
 	echo "<input type=\"hidden\" name=\"MAX_FILE_SIZE\" value=\"30000\" />";
